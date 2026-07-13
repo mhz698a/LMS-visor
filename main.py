@@ -8,7 +8,8 @@ import threading
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QLabel, QPushButton, QComboBox,
                              QStatusBar, QFrame, QGroupBox, QTextEdit, QSlider,
-                             QGraphicsView, QGraphicsScene, QGraphicsPixmapItem)
+                             QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
+                             QTabWidget, QCheckBox)
 from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize, QDateTime, QStandardPaths
 from PyQt6.QtGui import QImage, QPixmap, QFont, QKeyEvent, QGuiApplication, QWheelEvent
 
@@ -124,7 +125,7 @@ class HandAppQT(QMainWindow):
         # Inicialización de componentes (Lógica)
         self.model_path = "hand_landmarker.task"
         self.camera = CameraEngine()
-        self.processor = HandProcessor(self.model_path, num_hands=2)
+        self.processor = HandProcessor(self.model_path, num_hands=1)
         self.logic = GestureLogic()
         self.tracker = HandTracker()
         self._init_ui() # Inicializar UI antes para tener el log_widget
@@ -191,6 +192,10 @@ class HandAppQT(QMainWindow):
         self.combo_cam_source.addItems(["OAK-D", "Webcam"])
         cam_layout.addWidget(self.combo_cam_source)
 
+        self.btn_refresh_cams = QPushButton("Actualizar Cámaras")
+        self.btn_refresh_cams.clicked.connect(self.refresh_cameras)
+        cam_layout.addWidget(self.btn_refresh_cams)
+
         self.btn_cam = QPushButton("Conectar Cámara")
         self.btn_cam.setFixedHeight(40)
         self.btn_cam.clicked.connect(self.toggle_camera)
@@ -230,7 +235,7 @@ class HandAppQT(QMainWindow):
         self.btn_prev_letter.clicked.connect(self.prev_letter)
 
         self.combo_letter = QComboBox()
-        self.combo_letter.addItems(["NINGUNA"] + [chr(i) for i in range(ord('A'), ord('Z') + 1)])
+        self.combo_letter.addItems(["NINGUNA"] + [chr(i) for i in range(ord('A'), ord('Z') + 1)] + [str(i) for i in range(11)])
         self.combo_letter.currentTextChanged.connect(self.on_letter_changed)
 
         self.btn_next_letter = QPushButton(">")
@@ -254,7 +259,6 @@ class HandAppQT(QMainWindow):
         record_layout.addWidget(self.btn_record_motion)
 
         record_group.setLayout(record_layout)
-        sidebar.addWidget(record_group)
 
         # Grupo de Entrenamiento
         train_group = QGroupBox("Modelo ML")
@@ -272,11 +276,16 @@ class HandAppQT(QMainWindow):
         train_layout.addWidget(self.train_progress_lbl)
 
         train_group.setLayout(train_layout)
-        sidebar.addWidget(train_group)
 
         # Grupo de Configuración Visual
         visual_group = QGroupBox("Configuración Visual")
         visual_layout = QVBoxLayout()
+
+        self.chk_two_hands = QCheckBox("Permitir detección de dos manos")
+        self.chk_two_hands.setChecked(False)
+        self.chk_two_hands.toggled.connect(self.on_two_hands_toggled)
+        visual_layout.addWidget(self.chk_two_hands)
+
         visual_layout.addWidget(QLabel("Longitud de Estela:"))
         self.sld_trail_len = QSlider(Qt.Orientation.Horizontal)
         self.sld_trail_len.setRange(5, 100)
@@ -284,7 +293,6 @@ class HandAppQT(QMainWindow):
         self.sld_trail_len.valueChanged.connect(self.update_trail_len)
         visual_layout.addWidget(self.sld_trail_len)
         visual_group.setLayout(visual_layout)
-        sidebar.addWidget(visual_group)
 
         # Grupo de Utilidades
         util_group = QGroupBox("Utilidades")
@@ -298,10 +306,39 @@ class HandAppQT(QMainWindow):
         self.btn_screenshot.clicked.connect(self.take_full_screenshot)
         util_layout.addWidget(self.btn_screenshot)
         util_group.setLayout(util_layout)
-        sidebar.addWidget(util_group)
 
+        # --- CREAR PESTAÑAS (QTabWidget) ---
+        self.tabs = QTabWidget()
+
+        # Pestaña 1: Grabacion/Datos
+        tab_recording = QWidget()
+        rec_tab_layout = QVBoxLayout(tab_recording)
+        rec_tab_layout.addWidget(record_group)
+        rec_tab_layout.addStretch()
+        self.tabs.addTab(tab_recording, "Grabacion/Datos")
+
+        # Pestaña 2: Modelos ML
+        tab_models = QWidget()
+        models_tab_layout = QVBoxLayout(tab_models)
+        models_tab_layout.addWidget(train_group)
+        models_tab_layout.addStretch()
+        self.tabs.addTab(tab_models, "Modelos ML")
+
+        # Pestaña 3: Utilidades
+        tab_utils = QWidget()
+        utils_tab_layout = QVBoxLayout(tab_utils)
+        utils_tab_layout.addWidget(visual_group)
+        utils_tab_layout.addWidget(util_group)
+        utils_tab_layout.addStretch()
+        self.tabs.addTab(tab_utils, "Utilidades")
+
+        # Añadir las pestañas al sidebar
+        sidebar.addWidget(self.tabs)
         sidebar.addStretch()
         main_layout.addLayout(sidebar, stretch=1)
+
+        # Escanear cámaras disponibles al arrancar
+        self.refresh_cameras()
 
     def toggle_guide(self):
         """Muestra u oculta el panel lateral de la guía de señas."""
@@ -313,6 +350,35 @@ class HandAppQT(QMainWindow):
             QTimer.singleShot(50, self.guide_panel.viewer.reset_view)
         else:
             self.status_bar.showMessage("Guía de señas oculta")
+
+    def refresh_cameras(self):
+        """Escanea e identifica las cámaras web disponibles en el sistema."""
+        self.log_widget.append_log("Buscando cámaras conectadas...", "info")
+        indices = []
+        try:
+            for i in range(5):
+                cap = cv2.VideoCapture(i)
+                if cap is not None:
+                    if cap.isOpened():
+                        indices.append(i)
+                        cap.release()
+        except Exception as e:
+            self.log_widget.append_log(f"Error al escanear cámaras: {e}", "error")
+
+        current_selection = self.combo_cam_source.currentText()
+
+        self.combo_cam_source.clear()
+        self.combo_cam_source.addItem("OAK-D")
+        for idx in indices:
+            self.combo_cam_source.addItem(f"Webcam {idx}")
+
+        found_idx = self.combo_cam_source.findText(current_selection)
+        if found_idx >= 0:
+            self.combo_cam_source.setCurrentIndex(found_idx)
+        else:
+            self.combo_cam_source.setCurrentIndex(0)
+
+        self.log_widget.append_log(f"Búsqueda finalizada. Cámaras detectadas: {len(indices)}", "success")
 
     def toggle_camera(self):
         if not self.running_camera:
@@ -378,51 +444,65 @@ class HandAppQT(QMainWindow):
         self.last_timestamp_ms = curr_ms
 
         self.processor.detect(frame, curr_ms)
-        lands = self.processor.get_hand_landmarks(0)
 
-        if lands:
-            props = self.logic.extract_properties(lands, self.processor)
-            detected, source = self.logic.recognize_static(props, lands)
-            self.current_static_letter = detected if detected else "---"
-            self.recognition_source = source if source else "---"
+        # Obtener todas las manos detectadas
+        detected_hands = []
+        if self.processor.last_result and self.processor.last_result.hand_landmarks:
+            for i in range(len(self.processor.last_result.hand_landmarks)):
+                lands = self.processor.get_hand_landmarks(i)
+                if lands:
+                    detected_hands.append((i, lands))
 
-            # Triggers de movimiento
-            motion_target, fingers_to_track = self.logic.get_trigger_info(self.current_static_letter)
-            if motion_target:
-                self.target_motion_letter = motion_target
-                self.tracker.set_active_fingers(fingers_to_track)
-                self.lbl_motion_target.setText(f"Pendiente (F12): {motion_target}")
-            elif not self.recorder.recording:
-                self.target_motion_letter = None
-                self.tracker.set_active_fingers([])
-                self.lbl_motion_target.setText("Pendiente (F12): Ninguno")
+        has_primary_hand = False
 
-            self.tracker.update(lands, frame.shape)
+        # Dibujar landmarks de todas las manos detectadas y procesar
+        for hand_idx, lands in detected_hands:
+            self._draw_landmarks_cv(frame, lands)
 
-            # Reconocimiento de movimiento continuo
-            if self.tracker.active_fingers:
-                m_detected, m_conf = self.logic.recognize_motion(self.tracker.histories)
-                if m_detected and m_conf > 0.7:
-                    self.current_motion_letter = f"{m_detected} ({m_conf:.2f})"
+            if hand_idx == 0:
+                has_primary_hand = True
+                props = self.logic.extract_properties(lands, self.processor)
+                detected, source = self.logic.recognize_static(props, lands)
+                self.current_static_letter = detected if detected else "---"
+                self.recognition_source = source if source else "---"
+
+                # Triggers de movimiento
+                motion_target, fingers_to_track = self.logic.get_trigger_info(self.current_static_letter)
+                if motion_target:
+                    self.target_motion_letter = motion_target
+                    self.tracker.set_active_fingers(fingers_to_track)
+                    self.lbl_motion_target.setText(f"Pendiente (F12): {motion_target}")
+                elif not self.recorder.recording:
+                    self.target_motion_letter = None
+                    self.tracker.set_active_fingers([])
+                    self.lbl_motion_target.setText("Pendiente (F12): Ninguno")
+
+                self.tracker.update(lands, frame.shape, hand_idx=0)
+
+                # Reconocimiento de movimiento continuo
+                if self.tracker.active_fingers:
+                    m_detected, m_conf = self.logic.recognize_motion(self.tracker.histories)
+                    if m_detected and m_conf > 0.7:
+                        self.current_motion_letter = f"{m_detected} ({m_conf:.2f})"
+                    else:
+                        self.current_motion_letter = "---"
                 else:
                     self.current_motion_letter = "---"
+
+                if self.recorder.recording:
+                    record_data = {
+                        "letter": self.recorder.current_letter,
+                        "landmarks": [{"x": l.x, "y": l.y, "z": l.z} for l in lands],
+                        "direction": props["direction"],
+                        "rotation": props["rotation"],
+                        "tracked_fingers": self.tracker.active_fingers,
+                        "props": props
+                    }
+                    self.recorder.add_frame(record_data)
             else:
-                self.current_motion_letter = "---"
+                self.tracker.update(lands, frame.shape, hand_idx=hand_idx)
 
-            if self.recorder.recording:
-                record_data = {
-                    "letter": self.recorder.current_letter,
-                    "landmarks": [{"x": l.x, "y": l.y, "z": l.z} for l in lands],
-                    "direction": props["direction"],
-                    "rotation": props["rotation"],
-                    "tracked_fingers": self.tracker.active_fingers,
-                    "props": props
-                }
-                self.recorder.add_frame(record_data)
-
-            # Dibujar en el frame (solo visual)
-            self._draw_landmarks_cv(frame, lands)
-        else:
+        if not has_primary_hand:
             self.current_static_letter = "---"
             self.current_motion_letter = "---"
             self.recognition_source = "---"
@@ -474,6 +554,12 @@ class HandAppQT(QMainWindow):
             self.recorder.start_recording(self.target_motion_letter, is_motion=True)
         else:
             self.status_bar.showMessage("No hay gesto disparador activo")
+
+    def on_two_hands_toggled(self, checked):
+        num_hands = 2 if checked else 1
+        self.processor.set_num_hands(num_hands)
+        self.status_bar.showMessage(f"Detección de dos manos: {'Activada' if checked else 'Desactivada'}")
+        self.log_widget.append_log(f"Configuración de dos manos cambiada a: {'Activada' if checked else 'Desactivada'}", "info")
 
     def update_trail_len(self, val):
         self.tracker.set_max_len(val)
@@ -549,6 +635,10 @@ class HandAppQT(QMainWindow):
         # a-z
         if Qt.Key.Key_A <= key <= Qt.Key.Key_Z:
             char = chr(key).upper()
+            self.combo_letter.setCurrentText(char)
+
+        elif Qt.Key.Key_0 <= key <= Qt.Key.Key_9:
+            char = chr(key)
             self.combo_letter.setCurrentText(char)
 
         elif key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter:

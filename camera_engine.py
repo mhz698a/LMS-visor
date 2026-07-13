@@ -15,7 +15,7 @@ class CameraEngine:
         self.width = width
         self.height = height
         self.fps = fps
-        
+
         # Estado
         self.device = None
         self.q_rgb = None
@@ -41,7 +41,7 @@ class CameraEngine:
     def start(self, mode="OAK-D"):
         """
         Inicia la cámara seleccionada.
-        mode: "OAK-D" o "Webcam"
+        mode: "OAK-D", "Webcam 0", "Webcam 1", etc. o "Webcam"
         """
         if self.is_running: return True
 
@@ -58,14 +58,22 @@ class CameraEngine:
                 print(f"No se pudo iniciar OAK-D: {e}")
                 return False
         else:
-            self.cap_webcam = cv2.VideoCapture(0)
+            # Extraer el índice de la cámara si viene especificado
+            cam_idx = 0
+            if " " in mode:
+                try:
+                    cam_idx = int(mode.split()[-1])
+                except ValueError:
+                    cam_idx = 0
+
+            self.cap_webcam = cv2.VideoCapture(cam_idx)
             if self.cap_webcam.isOpened():
                 self.is_oak = False
                 self.is_running = True
-                print("Webcam iniciada correctamente.")
+                print(f"Webcam {cam_idx} iniciada correctamente.")
                 return True
             else:
-                print("Error: No se pudo abrir la webcam.")
+                print(f"Error: No se pudo abrir la webcam {cam_idx}.")
                 self.cap_webcam = None
                 return False
 
