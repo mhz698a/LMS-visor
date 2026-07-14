@@ -1,3 +1,4 @@
+import json
 #!py -3.10
 import sys
 import os
@@ -9,7 +10,8 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QLabel, QPushButton, QComboBox,
                              QStatusBar, QFrame, QGroupBox, QTextEdit, QSlider,
                              QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
-                             QTabWidget, QCheckBox)
+                             QTabWidget, QCheckBox, QDialog, QListWidget, QLineEdit,
+                             QMessageBox)
 from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize, QDateTime, QStandardPaths
 from PyQt6.QtGui import QImage, QPixmap, QFont, QKeyEvent, QGuiApplication, QWheelEvent
 
@@ -116,6 +118,95 @@ class TrainingThread(QThread):
         except Exception as e:
             self.finished.emit(False, f"Error: {e}")
 
+class GestureManagerDialog(QDialog):
+    def __init__(self, current_gestures, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Gestor de Gestos Aceptables")
+        self.setMinimumSize(400, 500)
+        self.gestures = list(current_gestures)
+
+        # Base gestures that cannot be deleted
+        self.base_gestures = ["NINGUNA"] + [chr(i) for i in range(ord("A"), ord("Z") + 1)] + [str(i) for i in range(11)]
+
+        self._init_ui()
+        self._populate_list()
+
+    def _init_ui(self):
+        layout = QVBoxLayout(self)
+
+        layout.addWidget(QLabel("Lista de Gestos Aceptables (Mayúsculas):"))
+
+        # List Widget
+        self.list_widget = QListWidget()
+        self.list_widget.currentItemChanged.connect(self.on_item_changed)
+        layout.addWidget(self.list_widget)
+
+        # Add layout
+        add_layout = QHBoxLayout()
+        self.line_edit = QLineEdit()
+        self.line_edit.setPlaceholderText("Nueva frase o letra...")
+        self.line_edit.textChanged.connect(lambda text: self.line_edit.setText(text.upper()))
+
+        self.btn_add = QPushButton("Añadir")
+        self.btn_add.clicked.connect(self.add_gesture)
+        add_layout.addWidget(self.line_edit)
+        add_layout.addWidget(self.btn_add)
+        layout.addLayout(add_layout)
+
+        # Delete and Close layout
+        btn_layout = QHBoxLayout()
+        self.btn_delete = QPushButton("Eliminar")
+        self.btn_delete.clicked.connect(self.delete_gesture)
+        self.btn_delete.setEnabled(False) # Start disabled
+
+        self.btn_close = QPushButton("Guardar y Cerrar")
+        self.btn_close.clicked.connect(self.accept)
+
+        btn_layout.addWidget(self.btn_delete)
+        btn_layout.addWidget(self.btn_close)
+        layout.addLayout(btn_layout)
+
+    def _populate_list(self):
+        self.list_widget.clear()
+        self.list_widget.addItems(self.gestures)
+
+    def on_item_changed(self, current, previous):
+        if not current:
+            self.btn_delete.setEnabled(False)
+            return
+
+        text = current.text()
+        if text in self.base_gestures:
+            self.btn_delete.setEnabled(False)
+        else:
+            self.btn_delete.setEnabled(True)
+
+    def add_gesture(self):
+        text = self.line_edit.text().strip().upper()
+        if not text:
+            return
+
+        if text in self.gestures:
+            QMessageBox.warning(self, "Gesto Duplicado", f"El gesto '{text}' ya existe en la lista.")
+            return
+
+        self.gestures.append(text)
+        self._populate_list()
+        self.line_edit.clear()
+
+    def delete_gesture(self):
+        current_item = self.list_widget.currentItem()
+        if not current_item:
+            return
+
+        text = current_item.text()
+        if text in self.base_gestures:
+            QMessageBox.critical(self, "Error", "No se puede eliminar un gesto base (letras A-Z, números 0-10, o NINGUNA).")
+            return
+
+        self.gestures.remove(text)
+        self._populate_list()
+
 class HandAppQT(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -141,10 +232,51 @@ class HandAppQT(QMainWindow):
         self.last_timestamp_ms = -1
         self.start_time_ns = time.perf_counter_ns()
 
+        # Historial de texto reconocido
+        self.text_history = []
+        self.stable_gesture_candidate = None
+        self.stable_gesture_count = 0
+        self.locked_stable_gesture = None
+        self.no_hand_time = None
+        self.last_added_gesture = None
+
         # Timer para el loop principal (aprox 30 FPS)
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_frame)
         self.timer.start(30)
+
+    def load_gestures_list(self):
+        base_gestures = ["NINGUNA"] + [chr(i) for i in range(ord("A"), ord("Z") + 1)] + [str(i) for i in range(11)]
+        filepath = "custom_gestures_list.json"
+        if not os.path.exists(filepath):
+            try:
+                with open(filepath, "w", encoding="utf-8") as f:
+                    json.dump(base_gestures, f, ensure_ascii=False, indent=4)
+            except Exception as e:
+                print(f"Error creando custom_gestures_list.json: {e}")
+            return base_gestures
+
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                # Asegurar que los gestos base están siempre incluidos
+                for bg in base_gestures:
+                    if bg not in data:
+                        data.append(bg)
+                return data
+        except Exception as e:
+            print(f"Error leyendo custom_gestures_list.json: {e}")
+            return base_gestures
+
+    def save_gestures_list(self, gestures):
+        try:
+            with open("custom_gestures_list.json", "w", encoding="utf-8") as f:
+                json.dump(gestures, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            if hasattr(self, "log_widget") and self.log_widget:
+                self.log_widget.append_log(f"Error guardando custom_gestures_list.json: {e}", "error")
+            else:
+                print(f"Error guardando custom_gestures_list.json: {e}")
 
     def _init_ui(self):
         # Widget principal y Layout
@@ -235,7 +367,8 @@ class HandAppQT(QMainWindow):
         self.btn_prev_letter.clicked.connect(self.prev_letter)
 
         self.combo_letter = QComboBox()
-        self.combo_letter.addItems(["NINGUNA"] + [chr(i) for i in range(ord('A'), ord('Z') + 1)] + [str(i) for i in range(11)])
+        gestures = self.load_gestures_list()
+        self.combo_letter.addItems(gestures)
         self.combo_letter.currentTextChanged.connect(self.on_letter_changed)
 
         self.btn_next_letter = QPushButton(">")
@@ -246,6 +379,10 @@ class HandAppQT(QMainWindow):
         letter_nav_layout.addWidget(self.combo_letter)
         letter_nav_layout.addWidget(self.btn_next_letter)
         record_layout.addLayout(letter_nav_layout)
+
+        self.btn_manage_gestures = QPushButton("Abrir Gestor de Gestos")
+        self.btn_manage_gestures.clicked.connect(self.open_gesture_manager)
+        record_layout.addWidget(self.btn_manage_gestures)
 
         self.btn_record_static = QPushButton("Grabar Estático (Enter)")
         self.btn_record_static.clicked.connect(self.record_static)
@@ -285,6 +422,18 @@ class HandAppQT(QMainWindow):
         self.chk_two_hands.setChecked(False)
         self.chk_two_hands.toggled.connect(self.on_two_hands_toggled)
         visual_layout.addWidget(self.chk_two_hands)
+
+        self.chk_show_history = QCheckBox("Mostrar historial en pantalla")
+        self.chk_show_history.setChecked(True)
+        visual_layout.addWidget(self.chk_show_history)
+
+        self.chk_avoid_duplicates = QCheckBox("Evitar duplicados seguidos")
+        self.chk_avoid_duplicates.setChecked(True)
+        visual_layout.addWidget(self.chk_avoid_duplicates)
+
+        self.btn_clear_history = QPushButton("Limpiar Historial")
+        self.btn_clear_history.clicked.connect(self.clear_history)
+        visual_layout.addWidget(self.btn_clear_history)
 
         visual_layout.addWidget(QLabel("Longitud de Estela:"))
         self.sld_trail_len = QSlider(Qt.Orientation.Horizontal)
@@ -350,6 +499,26 @@ class HandAppQT(QMainWindow):
             QTimer.singleShot(50, self.guide_panel.viewer.reset_view)
         else:
             self.status_bar.showMessage("Guía de señas oculta")
+
+    def open_gesture_manager(self):
+        current_gestures = [self.combo_letter.itemText(i) for i in range(self.combo_letter.count())]
+        dialog = GestureManagerDialog(current_gestures, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            new_gestures = dialog.gestures
+            self.save_gestures_list(new_gestures)
+
+            selected = self.combo_letter.currentText()
+
+            self.combo_letter.clear()
+            self.combo_letter.addItems(new_gestures)
+
+            found_idx = self.combo_letter.findText(selected)
+            if found_idx >= 0:
+                self.combo_letter.setCurrentIndex(found_idx)
+            else:
+                self.combo_letter.setCurrentIndex(0)
+
+            self.log_widget.append_log("Lista de gestos personalizados actualizada.", "success")
 
     def refresh_cameras(self):
         """Escanea e identifica las cámaras web disponibles en el sistema."""
@@ -507,8 +676,60 @@ class HandAppQT(QMainWindow):
             self.current_motion_letter = "---"
             self.recognition_source = "---"
 
+        # Lógica de escritura estable
+        if has_primary_hand and self.current_static_letter != "---":
+            if self.current_static_letter == self.stable_gesture_candidate:
+                self.stable_gesture_count += 1
+                if self.stable_gesture_count >= 10:
+                    if self.current_static_letter != self.locked_stable_gesture:
+                        self.locked_stable_gesture = self.current_static_letter
+
+                        avoid_duplicates = self.chk_avoid_duplicates.isChecked()
+                        if not avoid_duplicates or self.current_static_letter != self.last_added_gesture:
+                            self.text_history.append(self.current_static_letter)
+                            if len(self.text_history) > 15:
+                                self.text_history.pop(0)
+                            self.last_added_gesture = self.current_static_letter
+                            self.log_widget.append_log(f"Historial: Gesto '{self.current_static_letter}' registrado.", "info")
+            else:
+                self.stable_gesture_candidate = self.current_static_letter
+                self.stable_gesture_count = 1
+        else:
+            if self.stable_gesture_candidate == "---":
+                self.stable_gesture_count += 1
+                if self.stable_gesture_count >= 10:
+                    self.locked_stable_gesture = None
+            else:
+                self.stable_gesture_candidate = "---"
+                self.stable_gesture_count = 1
+
+        # Control del tiempo de ausencia de la mano para reiniciar duplicados
+        if has_primary_hand:
+            self.no_hand_time = None
+        else:
+            if self.no_hand_time is None:
+                self.no_hand_time = time.time()
+            elif time.time() - self.no_hand_time >= 1.0:
+                self.last_added_gesture = None
+
         self.recorder.update()
         self.tracker.draw_trails(frame)
+
+        # Dibujar historial de texto en el frame
+        if self.chk_show_history.isChecked() and self.text_history:
+            history_str = " ".join(self.text_history)
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 1.0
+            thickness = 2
+            color = (0, 255, 255) # Amarillo/Cyan
+
+            (text_w, text_h), baseline = cv2.getTextSize(history_str, font, font_scale, thickness)
+            x = (frame.shape[1] - text_w) // 2
+            y = frame.shape[0] - 30
+
+            # Dibujar sombra negra
+            cv2.putText(frame, history_str, (x + 2, y + 2), font, font_scale, (0, 0, 0), thickness + 2, cv2.LINE_AA)
+            cv2.putText(frame, history_str, (x, y), font, font_scale, color, thickness, cv2.LINE_AA)
 
         # Actualizar UI
         self.lbl_letter.setText(f"Letra: {self.current_static_letter}")
@@ -554,6 +775,13 @@ class HandAppQT(QMainWindow):
             self.recorder.start_recording(self.target_motion_letter, is_motion=True)
         else:
             self.status_bar.showMessage("No hay gesto disparador activo")
+
+    def clear_history(self):
+        self.text_history.clear()
+        self.last_added_gesture = None
+        self.locked_stable_gesture = None
+        self.status_bar.showMessage("Historial de texto limpiado")
+        self.log_widget.append_log("Historial de texto limpiado.", "info")
 
     def on_two_hands_toggled(self, checked):
         num_hands = 2 if checked else 1
