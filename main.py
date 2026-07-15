@@ -1,12 +1,11 @@
-#!py -3.10
 import json
+#!py -3.10
 import sys
 import os
 import time
 import cv2
 import numpy as np
 import threading
-import ctypes
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QLabel, QPushButton, QComboBox,
                              QStatusBar, QFrame, QGroupBox, QTextEdit, QSlider,
@@ -125,86 +124,86 @@ class GestureManagerDialog(QDialog):
         self.setWindowTitle("Gestor de Gestos Aceptables")
         self.setMinimumSize(400, 500)
         self.gestures = list(current_gestures)
-        
+
         # Base gestures that cannot be deleted
         self.base_gestures = ["NINGUNA"] + [chr(i) for i in range(ord("A"), ord("Z") + 1)] + [str(i) for i in range(11)]
-        
+
         self._init_ui()
         self._populate_list()
-        
+
     def _init_ui(self):
         layout = QVBoxLayout(self)
-        
+
         layout.addWidget(QLabel("Lista de Gestos Aceptables (Mayúsculas):"))
-        
+
         # List Widget
         self.list_widget = QListWidget()
         self.list_widget.currentItemChanged.connect(self.on_item_changed)
         layout.addWidget(self.list_widget)
-        
+
         # Add layout
         add_layout = QHBoxLayout()
         self.line_edit = QLineEdit()
         self.line_edit.setPlaceholderText("Nueva frase o letra...")
         self.line_edit.textChanged.connect(lambda text: self.line_edit.setText(text.upper()))
-        
+
         self.btn_add = QPushButton("Añadir")
         self.btn_add.clicked.connect(self.add_gesture)
         add_layout.addWidget(self.line_edit)
         add_layout.addWidget(self.btn_add)
         layout.addLayout(add_layout)
-        
+
         # Delete and Close layout
         btn_layout = QHBoxLayout()
         self.btn_delete = QPushButton("Eliminar")
         self.btn_delete.clicked.connect(self.delete_gesture)
         self.btn_delete.setEnabled(False) # Start disabled
-        
+
         self.btn_close = QPushButton("Guardar y Cerrar")
         self.btn_close.clicked.connect(self.accept)
-        
+
         btn_layout.addWidget(self.btn_delete)
         btn_layout.addWidget(self.btn_close)
         layout.addLayout(btn_layout)
-        
+
     def _populate_list(self):
         self.list_widget.clear()
         self.list_widget.addItems(self.gestures)
-        
+
     def on_item_changed(self, current, previous):
         if not current:
             self.btn_delete.setEnabled(False)
             return
-            
+
         text = current.text()
         if text in self.base_gestures:
             self.btn_delete.setEnabled(False)
         else:
             self.btn_delete.setEnabled(True)
-            
+
     def add_gesture(self):
         text = self.line_edit.text().strip().upper()
         if not text:
             return
-            
+
         if text in self.gestures:
             QMessageBox.warning(self, "Gesto Duplicado", f"El gesto '{text}' ya existe en la lista.")
             return
-            
+
         self.gestures.append(text)
         self._populate_list()
         self.line_edit.clear()
-        
+
     def delete_gesture(self):
         current_item = self.list_widget.currentItem()
         if not current_item:
             return
-            
+
         text = current_item.text()
         if text in self.base_gestures:
             QMessageBox.critical(self, "Error", "No se puede eliminar un gesto base (letras A-Z, números 0-10, o NINGUNA).")
             return
-            
+
         self.gestures.remove(text)
         self._populate_list()
 
@@ -256,7 +255,7 @@ class HandAppQT(QMainWindow):
             except Exception as e:
                 print(f"Error creando custom_gestures_list.json: {e}")
             return base_gestures
-        
+
         try:
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -418,24 +417,24 @@ class HandAppQT(QMainWindow):
         # Grupo de Configuración Visual
         visual_group = QGroupBox("Configuración Visual")
         visual_layout = QVBoxLayout()
-        
+
         self.chk_two_hands = QCheckBox("Permitir detección de dos manos")
         self.chk_two_hands.setChecked(False)
         self.chk_two_hands.toggled.connect(self.on_two_hands_toggled)
         visual_layout.addWidget(self.chk_two_hands)
-        
+
         self.chk_show_history = QCheckBox("Mostrar historial en pantalla")
         self.chk_show_history.setChecked(True)
         visual_layout.addWidget(self.chk_show_history)
-        
+
         self.chk_avoid_duplicates = QCheckBox("Evitar duplicados seguidos")
         self.chk_avoid_duplicates.setChecked(True)
         visual_layout.addWidget(self.chk_avoid_duplicates)
-        
+
         self.btn_clear_history = QPushButton("Limpiar Historial")
         self.btn_clear_history.clicked.connect(self.clear_history)
         visual_layout.addWidget(self.btn_clear_history)
-        
+
         visual_layout.addWidget(QLabel("Longitud de Estela:"))
         self.sld_trail_len = QSlider(Qt.Orientation.Horizontal)
         self.sld_trail_len.setRange(5, 100)
@@ -455,6 +454,11 @@ class HandAppQT(QMainWindow):
         self.btn_screenshot = QPushButton("Capturar Pantalla (Full)")
         self.btn_screenshot.clicked.connect(self.take_full_screenshot)
         util_layout.addWidget(self.btn_screenshot)
+
+        self.btn_open_pdf_manual = QPushButton("Abrir Manual de Usuario (PDF)")
+        self.btn_open_pdf_manual.clicked.connect(self.open_pdf_manual)
+        util_layout.addWidget(self.btn_open_pdf_manual)
+
         util_group.setLayout(util_layout)
 
         # --- CREAR PESTAÑAS (QTabWidget) ---
@@ -490,6 +494,30 @@ class HandAppQT(QMainWindow):
         # Escanear cámaras disponibles al arrancar
         self.refresh_cameras()
 
+    def open_pdf_manual(self):
+        """Abre el archivo MANUAL_USUARIO.pdf con el lector determinado del sistema operativo."""
+        filepath = "docs/MANUAL_USUARIO.pdf"
+        if not os.path.exists(filepath):
+            if hasattr(self, "log_widget") and self.log_widget:
+                self.log_widget.append_log("Error: No se encontró el archivo docs/MANUAL_USUARIO.pdf", "error")
+            self.status_bar.showMessage("Manual PDF no encontrado")
+            return
+
+        import platform
+        import subprocess
+        try:
+            self.log_widget.append_log("Abriendo manual de usuario en PDF...", "info")
+            if platform.system() == "Windows":
+                os.startfile(filepath)
+            elif platform.system() == "Darwin": # macOS
+                subprocess.call(["open", filepath])
+            else: # Linux/Unix
+                subprocess.call(["xdg-open", filepath])
+            self.status_bar.showMessage("Manual de usuario abierto")
+        except Exception as e:
+            self.log_widget.append_log(f"Error al abrir el manual PDF: {e}", "error")
+            self.status_bar.showMessage("Error al abrir manual PDF")
+
     def toggle_guide(self):
         """Muestra u oculta el panel lateral de la guía de señas."""
         is_visible = self.guide_panel.isVisible()
@@ -507,18 +535,18 @@ class HandAppQT(QMainWindow):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             new_gestures = dialog.gestures
             self.save_gestures_list(new_gestures)
-            
+
             selected = self.combo_letter.currentText()
-            
+
             self.combo_letter.clear()
             self.combo_letter.addItems(new_gestures)
-            
+
             found_idx = self.combo_letter.findText(selected)
             if found_idx >= 0:
                 self.combo_letter.setCurrentIndex(found_idx)
             else:
                 self.combo_letter.setCurrentIndex(0)
-                
+
             self.log_widget.append_log("Lista de gestos personalizados actualizada.", "success")
 
     def refresh_cameras(self):
@@ -526,7 +554,7 @@ class HandAppQT(QMainWindow):
         if hasattr(self, "btn_refresh_cams") and self.btn_refresh_cams:
             self.btn_refresh_cams.setEnabled(False)
         self.log_widget.append_log("Buscando cámaras conectadas en segundo plano...", "info")
-        
+
         def scan_task():
             indices = []
             try:
@@ -538,14 +566,14 @@ class HandAppQT(QMainWindow):
                             cap.release()
             except Exception as e:
                 print(f"Error al escanear cámaras: {e}")
-            
+
             QTimer.singleShot(0, lambda: self._on_cameras_scanned(indices))
-            
+
         threading.Thread(target=scan_task, daemon=True).start()
 
     def _on_cameras_scanned(self, indices):
         current_selection = self.combo_cam_source.currentText()
-        
+
         self.combo_cam_source.clear()
         self.combo_cam_source.addItem("OAK-D")
         for idx in indices:
@@ -564,7 +592,7 @@ class HandAppQT(QMainWindow):
     def toggle_camera(self):
         if not self.running_camera:
             mode = self.combo_cam_source.currentText()
-            
+
             if mode == "OAK-D":
                 # Conectar OAK-D de forma sincrónica en el hilo principal para evitar conflictos de hilos/USB de depthai
                 self.btn_cam.setEnabled(False)
@@ -577,11 +605,11 @@ class HandAppQT(QMainWindow):
                 self.btn_cam.setEnabled(False)
                 self.btn_cam.setText("Conectando...")
                 self.log_widget.append_log(f"Conectando a {mode} en segundo plano...", "info")
-                
+
                 def connect_task():
                     success = self.camera.start(mode=mode)
                     QTimer.singleShot(0, lambda: self._on_camera_connected(success, mode))
-                    
+
                 threading.Thread(target=connect_task, daemon=True).start()
         else:
             self.camera.stop()
@@ -648,7 +676,7 @@ class HandAppQT(QMainWindow):
         self.last_timestamp_ms = curr_ms
 
         self.processor.detect(frame, curr_ms)
-        
+
         # Obtener todas las manos detectadas
         detected_hands = []
         if self.processor.last_result and self.processor.last_result.hand_landmarks:
@@ -656,13 +684,13 @@ class HandAppQT(QMainWindow):
                 lands = self.processor.get_hand_landmarks(i)
                 if lands:
                     detected_hands.append((i, lands))
-                    
+
         has_primary_hand = False
-        
+
         # Dibujar landmarks de todas las manos detectadas y procesar
         for hand_idx, lands in detected_hands:
             self._draw_landmarks_cv(frame, lands)
-            
+
             if hand_idx == 0:
                 has_primary_hand = True
                 props = self.logic.extract_properties(lands, self.processor)
@@ -718,7 +746,7 @@ class HandAppQT(QMainWindow):
                 if self.stable_gesture_count >= 10:
                     if self.current_static_letter != self.locked_stable_gesture:
                         self.locked_stable_gesture = self.current_static_letter
-                        
+
                         avoid_duplicates = self.chk_avoid_duplicates.isChecked()
                         if not avoid_duplicates or self.current_static_letter != self.last_added_gesture:
                             self.text_history.append(self.current_static_letter)
@@ -757,11 +785,11 @@ class HandAppQT(QMainWindow):
             font_scale = 1.0
             thickness = 2
             color = (0, 255, 255) # Amarillo/Cyan
-            
+
             (text_w, text_h), baseline = cv2.getTextSize(history_str, font, font_scale, thickness)
             x = (frame.shape[1] - text_w) // 2
             y = frame.shape[0] - 30
-            
+
             # Dibujar sombra negra
             cv2.putText(frame, history_str, (x + 2, y + 2), font, font_scale, (0, 0, 0), thickness + 2, cv2.LINE_AA)
             cv2.putText(frame, history_str, (x, y), font, font_scale, color, thickness, cv2.LINE_AA)
