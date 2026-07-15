@@ -1,11 +1,12 @@
-import json
 #!py -3.10
+import json
 import sys
 import os
 import time
 import cv2
 import numpy as np
 import threading
+import ctypes
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QLabel, QPushButton, QComboBox,
                              QStatusBar, QFrame, QGroupBox, QTextEdit, QSlider,
@@ -13,9 +14,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QTabWidget, QCheckBox, QDialog, QListWidget, QLineEdit,
                              QMessageBox)
 from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QSize, QDateTime, QStandardPaths
-from PyQt6.QtGui import QImage, QPixmap, QFont, QKeyEvent, QGuiApplication, QWheelEvent
-
-# Importación de nuestros módulos personalizados
+from PyQt6.QtGui import QImage, QPixmap, QFont, QKeyEvent, QGuiApplication, QWheelEvent, QIcon
 from camera_engine import CameraEngine
 from hand_processor import HandProcessor
 from gesture_logic import GestureLogic
@@ -23,6 +22,9 @@ from tracker import HandTracker
 from recorder import GestureRecorder
 from training.train_static import train
 from training.train_motion import train_motion
+
+MYAPPID = "LMS-Visor"
+ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(MYAPPID)
 
 class GestureGuideViewer(QGraphicsView):
     """Visor de imágenes con soporte para zoom y desplazamiento (pan)."""
@@ -496,10 +498,15 @@ class HandAppQT(QMainWindow):
 
     def open_pdf_manual(self):
         """Abre el archivo MANUAL_USUARIO.pdf con el lector determinado del sistema operativo."""
-        filepath = "docs/MANUAL_USUARIO.pdf"
+        if getattr(sys, 'frozen', False):
+            ruta_actual = os.path.dirname(sys.executable)
+        else:
+            ruta_actual = os.path.dirname(os.path.abspath(__file__))
+        
+        filepath = f"{ruta_actual}/docs/MANUAL DE USUARIO.pdf"
         if not os.path.exists(filepath):
             if hasattr(self, "log_widget") and self.log_widget:
-                self.log_widget.append_log("Error: No se encontró el archivo docs/MANUAL_USUARIO.pdf", "error")
+                self.log_widget.append_log("Error: No se encontró el archivo MANUAL DE USUARIO.pdf", "error")
             self.status_bar.showMessage("Manual PDF no encontrado")
             return
 
@@ -946,6 +953,8 @@ class HandAppQT(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.setWindowIcon(QIcon(f"img/hand_ico.ico"))
+    
     window = HandAppQT()
     window.show()
     sys.exit(app.exec())
