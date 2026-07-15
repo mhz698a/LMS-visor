@@ -521,19 +521,28 @@ class HandAppQT(QMainWindow):
             self.log_widget.append_log("Lista de gestos personalizados actualizada.", "success")
 
     def refresh_cameras(self):
-        """Escanea e identifica las cámaras web disponibles en el sistema."""
-        self.log_widget.append_log("Buscando cámaras conectadas...", "info")
-        indices = []
-        try:
-            for i in range(5):
-                cap = cv2.VideoCapture(i)
-                if cap is not None:
-                    if cap.isOpened():
-                        indices.append(i)
-                        cap.release()
-        except Exception as e:
-            self.log_widget.append_log(f"Error al escanear cámaras: {e}", "error")
+        """Escanea e identifica las cámaras web disponibles en el sistema de forma asíncrona."""
+        if hasattr(self, "btn_refresh_cams") and self.btn_refresh_cams:
+            self.btn_refresh_cams.setEnabled(False)
+        self.log_widget.append_log("Buscando cámaras conectadas en segundo plano...", "info")
 
+        def scan_task():
+            indices = []
+            try:
+                for i in range(5):
+                    cap = cv2.VideoCapture(i)
+                    if cap is not None:
+                        if cap.isOpened():
+                            indices.append(i)
+                            cap.release()
+            except Exception as e:
+                print(f"Error al escanear cámaras: {e}")
+
+            QTimer.singleShot(0, lambda: self._on_cameras_scanned(indices))
+
+        threading.Thread(target=scan_task, daemon=True).start()
+
+    def _on_cameras_scanned(self, indices):
         current_selection = self.combo_cam_source.currentText()
 
         self.combo_cam_source.clear()
@@ -547,22 +556,32 @@ class HandAppQT(QMainWindow):
         else:
             self.combo_cam_source.setCurrentIndex(0)
 
+        if hasattr(self, "btn_refresh_cams") and self.btn_refresh_cams:
+            self.btn_refresh_cams.setEnabled(True)
         self.log_widget.append_log(f"Búsqueda finalizada. Cámaras detectadas: {len(indices)}", "success")
 
     def toggle_camera(self):
         if not self.running_camera:
             mode = self.combo_cam_source.currentText()
-            if self.camera.start(mode=mode):
-                self.running_camera = True
-                self.btn_cam.setText("Desconectar Cámara")
-                self.combo_cam_source.setEnabled(False)
-                self.status_bar.showMessage(f"Cámara {mode} conectada")
-                self.log_widget.append_log(f"Cámara {mode} conectada correctamente.", "success")
-                # Resetear procesador para evitar estados antiguos
-                self.processor.reset()
-                self.tracker.clear_all()
+
+            if mode == "OAK-D":
+                # Conectar OAK-D de forma sincrónica en el hilo principal para evitar conflictos de hilos/USB de depthai
+                self.btn_cam.setEnabled(False)
+                self.btn_cam.setText("Conectando...")
+                self.log_widget.append_log(f"Conectando a {mode}...", "info")
+                success = self.camera.start(mode=mode)
+                self._on_camera_connected(success, mode)
             else:
-                self.status_bar.showMessage("Error: No se pudo conectar la cámara")
+                # Conectar Webcams de forma asíncrona en segundo plano para no congelar la interfaz
+                self.btn_cam.setEnabled(False)
+                self.btn_cam.setText("Conectando...")
+                self.log_widget.append_log(f"Conectando a {mode} en segundo plano...", "info")
+
+                def connect_task():
+                    success = self.camera.start(mode=mode)
+                    QTimer.singleShot(0, lambda: self._on_camera_connected(success, mode))
+
+                threading.Thread(target=connect_task, daemon=True).start()
         else:
             self.camera.stop()
             self.running_camera = False
@@ -578,6 +597,21 @@ class HandAppQT(QMainWindow):
             self.lbl_letter.setText("Letra: ---")
             self.lbl_source.setText("Origen: ---")
             self.lbl_motion.setText("Movimiento: ---")
+
+    def _on_camera_connected(self, success, mode):
+        self.btn_cam.setEnabled(True)
+        if success:
+            self.running_camera = True
+            self.btn_cam.setText("Desconectar Cámara")
+            self.combo_cam_source.setEnabled(False)
+            self.status_bar.showMessage(f"Cámara {mode} conectada")
+            self.log_widget.append_log(f"Cámara {mode} conectada correctamente.", "success")
+            self.processor.reset()
+            self.tracker.clear_all()
+        else:
+            self.btn_cam.setText("Conectar Cámara")
+            self.status_bar.showMessage("Error: No se pudo conectar la cámara")
+            self.log_widget.append_log(f"No se pudo conectar a la cámara {mode}.", "error")
 
     def prev_letter(self):
         idx = self.combo_letter.currentIndex()
