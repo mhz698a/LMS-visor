@@ -1,5 +1,4 @@
 # LMS-Visor
-## Documentación instructiva
 
 ![Screenshot del Sistema](https://github.com/user-attachments/assets/a9a0524e-b278-4ab4-acf3-1ddcb28737f3)
 
