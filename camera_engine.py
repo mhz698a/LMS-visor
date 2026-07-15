@@ -15,7 +15,7 @@ class CameraEngine:
         self.width = width
         self.height = height
         self.fps = fps
-
+        
         # Estado
         self.device = None
         self.q_rgb = None

@@ -72,7 +72,7 @@ class HandProcessor:
             return None
         if hand_idx >= len(self.last_result.hand_landmarks):
             return None
-
+        
         lands = self.last_result.hand_landmarks[hand_idx]
         return self._smooth_landmarks(hand_idx, lands)
 
@@ -83,7 +83,7 @@ class HandProcessor:
         if prev is None:
             self._prev_smoothed[hand_index] = coords
             return coords
-
+        
         alpha = self.smooth_alpha
         out = []
         for p, c in zip(prev, coords):
@@ -119,8 +119,8 @@ class HandProcessor:
         """
         Determina la dirección de la mano (Arriba, Abajo, Izquierda, Derecha).
         Retorna tanto el nombre como el vector unitario.
-
-        Explicación para estudiantes:
+        
+        Explicación para estudiantes: 
         Calculamos la diferencia entre la muñeca (punto 0) y el nudillo del dedo medio (punto 9).
         Esto nos da un vector que apunta 'hacia adelante' de la palma.
         """
@@ -128,15 +128,15 @@ class HandProcessor:
         middle_mcp = lands[9]
         dx = middle_mcp.x - wrist.x
         dy = middle_mcp.y - wrist.y
-
+        
         mag = math.hypot(dx, dy)
         vector = (dx/mag, dy/mag) if mag > 0 else (0, 0)
-
+        
         if abs(dx) > abs(dy):
             label = "Derecha" if dx > 0 else "Izquierda"
         else:
             label = "Abajo" if dy > 0 else "Arriba"
-
+            
         return {"label": label, "vector": vector}
 
     def get_hand_rotation(self, lands):
